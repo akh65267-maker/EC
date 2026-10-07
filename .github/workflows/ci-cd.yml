@@ -78,3 +78,8 @@ jobs:
           -AlertEmail '${{ vars.ALERT_EMAIL }}'
           -Location '${{ vars.AZURE_LOCATION || 'eastus2' }}'
           -EnvironmentName '${{ vars.ENVIRONMENT_NAME || 'myec' }}'
+
+      - name: Smoke test
+        if: steps.azure.outputs.configured == 'true'
+        shell: pwsh
+        run: ./infra/smoke-test.ps1 -EnvironmentName '${{ vars.ENVIRONMENT_NAME || 'myec' }}'
