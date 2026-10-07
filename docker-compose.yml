@@ -28,7 +28,9 @@ services:
       ConnectionStrings__Redis: redis:6379
       ConnectionStrings__ServiceBus: &sb Endpoint=sb://servicebus;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true;
       ServiceBus__QueueName: basket-checkout
-    depends_on: [redis, servicebus]
+    depends_on:
+      redis: { condition: service_started }
+      servicebus-ready: { condition: service_completed_successfully }
 
   order-api:
     build: { context: ., dockerfile: Order.API/Dockerfile }
@@ -40,7 +42,7 @@ services:
       ServiceBus__QueueName: basket-checkout
     depends_on:
       postgres: { condition: service_healthy }
-      servicebus: { condition: service_started }
+      servicebus-ready: { condition: service_completed_successfully }
 
   postgres:
     image: postgres:16
@@ -65,12 +67,19 @@ services:
   servicebus:
     image: mcr.microsoft.com/azure-messaging/servicebus-emulator:latest
     volumes: [./servicebus-config.json:/ServiceBus_Emulator/ConfigFiles/Config.json]
-    ports: ["5672:5672"]
+    ports: ["5672:5672", "5300:5300"]
     environment:
       SQL_SERVER: sqlserver
       MSSQL_SA_PASSWORD: Local_Dev_Pass123!
       ACCEPT_EULA: "Y"
     depends_on: [sqlserver]
+
+  # The emulator image has no shell, so it can't run its own healthcheck.
+  # This one-shot container polls its health endpoint and exits once it's ready.
+  servicebus-ready:
+    image: curlimages/curl
+    command: ["sh", "-c", "until curl -sf http://servicebus:5300/health; do echo waiting for servicebus; sleep 3; done"]
+    depends_on: [servicebus]
 
   sqlserver: # required by the Service Bus emulator
     image: mcr.microsoft.com/mssql/server:2022-latest
