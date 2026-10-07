@@ -61,6 +61,15 @@ Roughly **$25–45/month**, well under the $200 credit. A budget alert emails yo
 
 Reads the deployment outputs, then checks every service end to end through API Management: products in PostgreSQL, image upload to Blob Storage, basket in Redis, checkout over Service Bus, and the order appearing in Order.API. The order check also covers Order.API starting up from zero. It exits with code 1 if anything fails. CI runs it after each deploy.
 
+Locally, against docker compose or Visual Studio (F5):
+
+```powershell
+./infra/smoke-test.ps1 -Local                # docker compose (ports 5001-5003)
+./infra/smoke-test.ps1 -Local -VisualStudio  # F5 (launchSettings ports)
+```
+
+Without Azure, only the anonymous checks run and the rest are skipped. Once the Entra app exists, the token is picked up automatically. The services also need the same `EntraId` values, from `.env` for compose or User Secrets for Visual Studio.
+
 You need the `Catalog.Admin` role, which goes to whoever deployed first. Get it by signing in with `az login` as that account, or assign the role to yourself.
 
 ## Tear down
