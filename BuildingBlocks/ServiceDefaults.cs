@@ -8,6 +8,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.OpenApi;
 using Npgsql;
 
 namespace BuildingBlocks;
@@ -46,7 +47,22 @@ public static class ServiceDefaults
 
         services.AddHealthChecks();
         services.AddControllers();
-        services.AddOpenApi();
+        services.AddOpenApi(o => o.AddDocumentTransformer((doc, _, _) =>
+        {
+            // Adds the "Authorize" button to Swagger UI for pasting an Entra access token.
+            doc.Components ??= new OpenApiComponents();
+            doc.Components.SecuritySchemes ??= new Dictionary<string, IOpenApiSecurityScheme>();
+            doc.Components.SecuritySchemes["Bearer"] = new OpenApiSecurityScheme
+            {
+                Type = SecuritySchemeType.Http,
+                Scheme = "bearer",
+                BearerFormat = "JWT",
+                Description = "Entra ID access token (az account get-access-token --scope <entraScope>)"
+            };
+            doc.Security ??= [];
+            doc.Security.Add(new OpenApiSecurityRequirement { [new OpenApiSecuritySchemeReference("Bearer", doc)] = [] });
+            return Task.CompletedTask;
+        }));
         return builder;
     }
 
@@ -76,7 +92,14 @@ public static class ServiceDefaults
     public static WebApplication MapServiceDefaults(this WebApplication app)
     {
         if (app.Environment.IsDevelopment())
+        {
             app.MapOpenApi();
+            app.UseSwaggerUI(o =>
+            {
+                o.SwaggerEndpoint("/openapi/v1.json", app.Environment.ApplicationName);
+                o.RoutePrefix = "swagger";
+            });
+        }
 
         app.UseAuthentication();
         app.UseAuthorization();
