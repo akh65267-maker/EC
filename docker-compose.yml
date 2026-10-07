@@ -1,0 +1,80 @@
+# Local development: docker compose up --build
+# Emulators replace Azure services; connection strings switch the apps off managed identity.
+x-entra: &entra
+  ASPNETCORE_ENVIRONMENT: Development
+  EntraId__TenantId: ${ENTRA_TENANT_ID:-}
+  EntraId__ClientId: ${ENTRA_CLIENT_ID:-}
+  EntraId__Audience: ${ENTRA_AUDIENCE:-}
+
+services:
+  catalog-api:
+    build: { context: ., dockerfile: Catalog.API/Dockerfile } # exposed on 5001 via azurite-net
+    environment:
+      <<: *entra
+      ConnectionStrings__CatalogDb: Host=postgres;Database=catalogdb;Username=postgres;Password=postgres
+      ConnectionStrings__Blob: DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://localhost:10000/devstoreaccount1;
+      Storage__ImagesContainer: product-images
+    network_mode: service:azurite-net # lets "localhost:10000" image URLs work from your browser too
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  basket-api:
+    build: { context: ., dockerfile: Basket.API/Dockerfile }
+    ports: ["5002:8080"]
+    environment:
+      <<: *entra
+      ConnectionStrings__Redis: redis:6379
+      ConnectionStrings__ServiceBus: &sb Endpoint=sb://servicebus;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true;
+      ServiceBus__QueueName: basket-checkout
+    depends_on: [redis, servicebus]
+
+  order-api:
+    build: { context: ., dockerfile: Order.API/Dockerfile }
+    ports: ["5003:8080"]
+    environment:
+      <<: *entra
+      ConnectionStrings__OrderDb: Host=postgres;Database=orderdb;Username=postgres;Password=postgres
+      ConnectionStrings__ServiceBus: *sb
+      ServiceBus__QueueName: basket-checkout
+    depends_on:
+      postgres: { condition: service_healthy }
+      servicebus: { condition: service_started }
+
+  postgres:
+    image: postgres:16
+    environment: { POSTGRES_USER: postgres, POSTGRES_PASSWORD: postgres }
+    ports: ["5432:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+
+  # Shares its network namespace with catalog-api (see network_mode above).
+  azurite-net:
+    image: mcr.microsoft.com/azure-storage/azurite
+    command: azurite-blob --blobHost 0.0.0.0 --skipApiVersionCheck
+    ports: ["10000:10000", "5001:8080"]
+
+  servicebus:
+    image: mcr.microsoft.com/azure-messaging/servicebus-emulator:latest
+    volumes: [./servicebus-config.json:/ServiceBus_Emulator/ConfigFiles/Config.json]
+    ports: ["5672:5672"]
+    environment:
+      SQL_SERVER: sqlserver
+      MSSQL_SA_PASSWORD: Local_Dev_Pass123!
+      ACCEPT_EULA: "Y"
+    depends_on: [sqlserver]
+
+  sqlserver: # required by the Service Bus emulator
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      MSSQL_SA_PASSWORD: Local_Dev_Pass123!
+      ACCEPT_EULA: "Y"
+
+volumes:
+  pgdata:

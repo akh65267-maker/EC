@@ -1,0 +1,20 @@
+<Solution>
+  <Folder Name="/Infra/" />
+  <Folder Name="/src/" />
+  <Folder Name="/src/BuildingBlocks/">
+    <Project Path="BuildingBlocks/BuildingBlocks.csproj" />
+  </Folder>
+  <Folder Name="/src/Basket/">
+    <Project Path="Basket.API/Basket.API.csproj" Id="fa32ff1f-e9c9-45be-9f3b-98f354424593" />
+  </Folder>
+  <Folder Name="/src/Catalog/">
+    <Project Path="Catalog.API/Catalog.API.csproj" Id="d20309a2-b897-4c81-9cc8-ba78d88ccd95" />
+  </Folder>
+  <Folder Name="/src/Order/">
+    <Project Path="Order.API/Order.API.csproj" Id="7653696f-e293-4795-a8f1-6bf82dff12e2" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Services.IntegrationTests/Services.IntegrationTests.csproj" />
+    <Project Path="tests/Services.Tests/Services.Tests.csproj" />
+  </Folder>
+</Solution>

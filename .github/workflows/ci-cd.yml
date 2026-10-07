@@ -1,0 +1,62 @@
+name: CI/CD
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  id-token: write # OIDC login to Azure, no stored secrets
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Build .NET solution
+        run: dotnet build MyEc.slnx -c Release -warnaserror
+
+      - name: Unit tests
+        run: dotnet test tests/Services.Tests -c Release --no-build
+
+      # Testcontainers: real PostgreSQL, Redis, Azurite, Service Bus emulator (Docker is preinstalled on the runner)
+      - name: Integration tests
+        run: dotnet test tests/Services.IntegrationTests -c Release --no-build
+
+      - name: Validate Bicep
+        run: az bicep build --file infra/main.bicep --stdout > /dev/null
+
+  deploy:
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # Same script as local deploys: infra -> build images in ACR -> apps + APIM.
+      - name: Deploy
+        shell: pwsh
+        run: >
+          ./infra/deploy.ps1
+          -AlertEmail '${{ vars.ALERT_EMAIL }}'
+          -Location '${{ vars.AZURE_LOCATION || 'eastus2' }}'
+          -EnvironmentName '${{ vars.ENVIRONMENT_NAME || 'myec' }}'
