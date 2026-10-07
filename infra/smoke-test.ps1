@@ -2,7 +2,8 @@
 #   Azure (through APIM):         ./infra/smoke-test.ps1
 #   Local docker compose:         ./infra/smoke-test.ps1 -Local
 #   Local Visual Studio (F5):     ./infra/smoke-test.ps1 -Local -VisualStudio
-# Signed-in checks need an Entra token: taken from the Azure deployment, or pass -Scope. Without one, only anonymous checks run.
+# Signed-in checks use an Entra token (from the Azure deployment, or -Scope). With -Local and no token they use the
+# dev auth bypass headers (Auth:DevBypass, Development only); otherwise they are skipped.
 param(
     [string]$EnvironmentName = 'myec',
     [switch]$Local,
@@ -16,7 +17,7 @@ $skipped = 0
 
 function Step([string]$name, [scriptblock]$body, [switch]$NeedsAuth) {
     Write-Host "`n> $name" -ForegroundColor Cyan
-    if ($NeedsAuth -and -not $token) { $script:skipped++; Write-Host "  SKIP (no Entra token)" -ForegroundColor Yellow; return }
+    if ($NeedsAuth -and -not $token -and -not $devAuth) { $script:skipped++; Write-Host "  SKIP (no Entra token)" -ForegroundColor Yellow; return }
     try { & $body; Write-Host "  PASS" -ForegroundColor Green }
     catch { $script:failures++; Write-Host "  FAIL: $($_.Exception.Message)" -ForegroundColor Red }
 }
@@ -24,7 +25,7 @@ function Step([string]$name, [scriptblock]$body, [switch]$NeedsAuth) {
 # Retries cover cold starts (apps scale to zero in Azure, containers warming up locally).
 function Api([string]$method, [string]$service, [string]$path, $body = $null, [switch]$Anonymous, [int]$attempts = 6) {
     $params = @{ Uri = "$($base[$service])$path"; Method = $method; ContentType = 'application/json'; TimeoutSec = 60 }
-    if (-not $Anonymous -and $token) { $params.Headers = @{ Authorization = "Bearer $token" } }
+    if (-not $Anonymous) { $params.Headers = $authHeaders }
     if ($null -ne $body) { $params.Body = ConvertTo-Json $body -Depth 5 -Compress }
     for ($i = 1; ; $i++) {
         try { return Invoke-RestMethod @params }
@@ -67,7 +68,12 @@ if ($Scope) {
 } elseif (-not $Local) {
     throw 'No Entra scope available.'
 }
+$devAuth = $Local -and -not $token
+$authHeaders = if ($token) { @{ Authorization = "Bearer $token" } }
+               elseif ($devAuth) { @{ 'X-Dev-User' = 'smoke-user'; 'X-Dev-Roles' = 'Catalog.Admin' } }
+               else { @{} }
 Write-Host "Catalog: $($base.catalog)`nBasket:  $($base.basket)`nOrder:   $($base.order)"
+if ($devAuth) { Write-Host "Auth:    dev bypass headers (X-Dev-User: smoke-user)" -ForegroundColor Yellow }
 
 # ---------- Tests ----------
 Step 'Health endpoints' {
@@ -90,7 +96,8 @@ Step 'Catalog: image upload (Blob Storage / Azurite)' -NeedsAuth {
     $png = [Convert]::FromBase64String('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==')
     $file = Join-Path ([IO.Path]::GetTempPath()) 'smoke.png'
     [IO.File]::WriteAllBytes($file, $png)
-    $json = curl.exe -sS -f -H "Authorization: Bearer $token" -F "file=@$file;type=image/png" "$($base.catalog)/api/products/$($product.id)/image"
+    $hdr = $authHeaders.GetEnumerator() | ForEach-Object { "-H"; "$($_.Key): $($_.Value)" }
+    $json = curl.exe -sS -f @hdr -F "file=@$file;type=image/png" "$($base.catalog)/api/products/$($product.id)/image"
     if ($LASTEXITCODE) { throw "upload failed (curl exit $LASTEXITCODE)" }
     $url = ($json | ConvertFrom-Json).imageUrl
     $downloaded = (Invoke-WebRequest $url -UseBasicParsing).Content
@@ -110,7 +117,8 @@ Step 'Basket: checkout (Service Bus)' -NeedsAuth {
 Step 'Order: order created from queue (PostgreSQL)' -NeedsAuth {
     $deadline = (Get-Date).AddSeconds($OrderTimeoutSeconds)
     do {
-        $order = @(Api GET order '/api/orders') | Where-Object id -eq $eventId
+        # ForEach-Object unrolls the array: Windows PowerShell 5.1 emits a JSON array as one object.
+        $order = Api GET order '/api/orders' | ForEach-Object { $_ } | Where-Object id -eq $eventId
         if ($order) { if ($order.total -ne 40) { throw "expected total 40, got $($order.total)" }; return }
         Start-Sleep -Seconds 5
     } while ((Get-Date) -lt $deadline)

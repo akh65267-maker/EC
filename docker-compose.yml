@@ -4,6 +4,7 @@
 # Emulators replace Azure services; connection strings switch the apps off managed identity.
 x-entra: &entra
   ASPNETCORE_ENVIRONMENT: Development
+  Auth__DevBypass: "true" # local only; see BuildingBlocks/DevAuthHandler.cs
   EntraId__TenantId: ${ENTRA_TENANT_ID:-}
   EntraId__ClientId: ${ENTRA_CLIENT_ID:-}
   EntraId__Audience: ${ENTRA_AUDIENCE:-}

@@ -68,7 +68,21 @@ Locally, against docker compose or Visual Studio (F5):
 ./infra/smoke-test.ps1 -Local -VisualStudio  # F5 (launchSettings ports)
 ```
 
-Without Azure, only the anonymous checks run and the rest are skipped. Once the Entra app exists, the token is picked up automatically. The services also need the same `EntraId` values, from `.env` for compose or User Secrets for Visual Studio.
+Without an Entra token, the local run signs in through the **dev auth bypass**, so every check runs with no Azure needed.
+
+### Dev auth bypass (local only)
+
+Locally, `Auth:DevBypass` is on, in `appsettings.Development.json` and docker-compose. Send these headers to act as any user:
+
+| Header | Example |
+|---|---|
+| `X-Dev-User` | `alice` |
+| `X-Dev-Roles` | `Catalog.Admin` (optional, comma-separated) |
+
+In Swagger UI (`/swagger`), click **Authorize** and fill in `DevUser` / `DevRoles`.
+
+- Requests without `X-Dev-User` still go through real Entra JWT validation, so 401 and 403 behave as in Azure.
+- The services refuse to start if `Auth:DevBypass` is set outside the `Development` environment. Azure never runs in Development.
 
 You need the `Catalog.Admin` role, which goes to whoever deployed first. Get it by signing in with `az login` as that account, or assign the role to yourself.
 

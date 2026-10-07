@@ -2,6 +2,7 @@ using System.Security.Claims;
 using Azure.Core;
 using Azure.Identity;
 using Azure.Monitor.OpenTelemetry.AspNetCore;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.EntityFrameworkCore;
@@ -33,8 +34,20 @@ public static class ServiceDefaults
 
         // Microsoft Entra ID replaces a custom user service.
         var entra = config.GetSection("EntraId");
-        services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-            .AddJwtBearer(o =>
+
+        // Local testing without Entra: never allowed outside Development.
+        var devBypass = config.GetValue<bool>("Auth:DevBypass");
+        if (devBypass && !builder.Environment.IsDevelopment())
+            throw new InvalidOperationException("Auth:DevBypass is only allowed in the Development environment.");
+
+        var auth = services.AddAuthentication(o =>
+        {
+            o.DefaultScheme = devBypass ? DevAuthHandler.SchemeName : JwtBearerDefaults.AuthenticationScheme;
+            o.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+        });
+        if (devBypass)
+            auth.AddScheme<AuthenticationSchemeOptions, DevAuthHandler>(DevAuthHandler.SchemeName, null);
+        auth.AddJwtBearer(o =>
             {
                 o.Authority = $"https://login.microsoftonline.com/{entra["TenantId"]}/v2.0";
                 o.MapInboundClaims = false;
@@ -61,6 +74,26 @@ public static class ServiceDefaults
             };
             doc.Security ??= [];
             doc.Security.Add(new OpenApiSecurityRequirement { [new OpenApiSecuritySchemeReference("Bearer", doc)] = [] });
+
+            if (devBypass)
+            {
+                // Fill these in Swagger UI's "Authorize" dialog to call endpoints without Entra.
+                doc.Components.SecuritySchemes["DevUser"] = new OpenApiSecurityScheme
+                {
+                    Type = SecuritySchemeType.ApiKey, In = ParameterLocation.Header, Name = DevAuthHandler.UserHeader,
+                    Description = "Dev bypass: any user id, e.g. alice"
+                };
+                doc.Components.SecuritySchemes["DevRoles"] = new OpenApiSecurityScheme
+                {
+                    Type = SecuritySchemeType.ApiKey, In = ParameterLocation.Header, Name = DevAuthHandler.RolesHeader,
+                    Description = $"Dev bypass: comma-separated roles, e.g. {AdminRole}"
+                };
+                doc.Security.Add(new OpenApiSecurityRequirement
+                {
+                    [new OpenApiSecuritySchemeReference("DevUser", doc)] = [],
+                    [new OpenApiSecuritySchemeReference("DevRoles", doc)] = []
+                });
+            }
             return Task.CompletedTask;
         }));
         return builder;
