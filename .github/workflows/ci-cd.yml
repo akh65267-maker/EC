@@ -44,9 +44,26 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
     steps:
+      # Secrets can't be used in a job-level `if`, so skip the remaining steps here until Azure is set up.
+      - name: Check Azure configuration
+        id: azure
+        env:
+          CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          ALERT_EMAIL: ${{ vars.ALERT_EMAIL }}
+        run: |
+          if [ -n "$CLIENT_ID" ] && [ -n "$TENANT_ID" ] && [ -n "$SUBSCRIPTION_ID" ] && [ -n "$ALERT_EMAIL" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice title=Deploy skipped::Set AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID secrets and ALERT_EMAIL variable (see infra/README.md)."
+          fi
+
       - uses: actions/checkout@v4
+        if: steps.azure.outputs.configured == 'true'
 
       - uses: azure/login@v2
+        if: steps.azure.outputs.configured == 'true'
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
@@ -54,6 +71,7 @@ jobs:
 
       # Same script as local deploys: infra -> build images in ACR -> apps + APIM.
       - name: Deploy
+        if: steps.azure.outputs.configured == 'true'
         shell: pwsh
         run: >
           ./infra/deploy.ps1
