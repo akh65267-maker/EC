@@ -1,4 +1,6 @@
 # Local development: docker compose up --build
+# Debugging from Visual Studio instead? Start only the dependencies, then F5 (appsettings.Development.json points here):
+#   docker compose up postgres redis azurite-net servicebus sqlserver
 # Emulators replace Azure services; connection strings switch the apps off managed identity.
 x-entra: &entra
   ASPNETCORE_ENVIRONMENT: Development

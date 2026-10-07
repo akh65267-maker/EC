@@ -69,6 +69,9 @@ public class ServiceFactory<TMarker>(Dictionary<string, string> settings) : WebA
 {
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
+        // Not Development, so appsettings.Development.json (localhost emulators) isn't loaded.
+        builder.UseEnvironment("Testing");
+
         // UseSetting is visible to config read eagerly in Program.cs.
         foreach (var (key, value) in settings)
             builder.UseSetting(key, value);
